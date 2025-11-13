@@ -87,3 +87,33 @@ body {
      border: 1px solid #ccc;
      border-radius: 2px;
 }
+
+/* Toggle Button Styles */
+#view-toggle-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 12px 20px;
+    background-color: #5c1010;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 14px;
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    transition: all 0.3s ease;
+    z-index: 1000;
+}
+
+#view-toggle-btn:hover {
+    background-color: #7a1515;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transform: translateY(-2px);
+}
+
+#view-toggle-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}

@@ -36,9 +36,13 @@ const ROTATION_SENSITIVITY = 60;
 const ZOOM_SENSITIVITY = 0.5;
 let rotationTimer;
 
+// VIEW MODE VARIABLES
+// ----------------------------------------
+let currentViewMode = "3d"; // "3d" or "2d"
+
 // MAIN FUNCTION
 // ----------------------------------------
-async function drawGlobe() {
+async function drawGlobe(viewMode = "3d") {
 
     // Init variables
     const geoJson = await d3.json(GEO_JSON_PATH);
@@ -46,13 +50,22 @@ async function drawGlobe() {
     const colorPalette = createColorPalette(contextData);
     const toolTip = d3.select("#tooltip")
 
-    // Globe initialization
-    const geoProjection = d3.geoOrthographic()
-        .scale(GLOBE_RADIUS)
-        .center([0, 0])
-        .rotate([0, -25])
-        .translate(GLOBE_CENTER);
-    
+    // Projection initialization based on view mode
+    let geoProjection;
+    if (viewMode === "3d") {
+        geoProjection = d3.geoOrthographic()
+            .scale(GLOBE_RADIUS)
+            .center([0, 0])
+            .rotate([0, -25])
+            .translate(GLOBE_CENTER);
+    } else {
+        // 2D Map view using Equirectangular projection
+        geoProjection = d3.geoEquirectangular()
+            .scale(GLOBE_RADIUS * 0.8)
+            .center([0, 0])
+            .translate(GLOBE_CENTER);
+    }
+
     const initialScale = geoProjection.scale();
 
     // Append svg to the container
@@ -66,21 +79,23 @@ async function drawGlobe() {
     // Convert geoJson data to svg path
     const geoPathGenerator = d3.geoPath().projection(geoProjection);
 
-    // Set outline of the globe
-    globeSvg.append("circle")
-        .attr("id", "globe")
-        .attr("cx", GLOBE_WIDTH / 2)
-        .attr("cy", GLOBE_HEIGHT / 2)
-        .attr("r", geoProjection.scale());
+    // Set outline of the globe (only for 3D view)
+    if (viewMode === "3d") {
+        globeSvg.append("circle")
+            .attr("id", "globe")
+            .attr("cx", GLOBE_WIDTH / 2)
+            .attr("cy", GLOBE_HEIGHT / 2)
+            .attr("r", geoProjection.scale());
+    }
 
     // Append a group to the svg
     const globeMap = globeSvg.append("g")
 
     // Creating function to update the geoProjection
-    globeSvg.call(createDrag(geoProjection, globeSvg, geoPathGenerator));
+    globeSvg.call(createDrag(geoProjection, globeSvg, geoPathGenerator, viewMode));
 
     // Creating function to zoom in and out
-    configureZoom(globeSvg, initialScale, geoProjection);
+    configureZoom(globeSvg, initialScale, geoProjection, viewMode);
 
     // Read geoJson data and draw the globe (country by country)
     globeMap.append("g")
@@ -118,9 +133,11 @@ async function drawGlobe() {
             toolTip.transition()
                 .style("display", "none");
         });
-    
-    // Optional rotate
-    rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
+
+    // Optional rotate (only for 3D view)
+    if (viewMode === "3d") {
+        rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
+    }
 
     window.addEventListener("resize", () => {
         resizeGlobe(geoProjection, globeSvg, contextData, geoPathGenerator);
@@ -142,24 +159,36 @@ function createColorPalette(data) {
         .range(COLOR_RANGE);
 };
 
-function createDrag(geoProjection, globeSvg, geoPathGenerator) {
+function createDrag(geoProjection, globeSvg, geoPathGenerator, viewMode) {
     return d3.drag().on("start", () => {
-        rotationTimer.stop();
+        if (rotationTimer) rotationTimer.stop();
     })
     .on("drag", () => {
-        const rotate = geoProjection.rotate()
-        const rotationAdjustmentFactor = ROTATION_SENSITIVITY / geoProjection.scale()
+        if (viewMode === "3d") {
+            // Rotate for 3D globe
+            const rotate = geoProjection.rotate()
+            const rotationAdjustmentFactor = ROTATION_SENSITIVITY / geoProjection.scale()
 
-        geoProjection.rotate([
-            rotate[0] + d3.event.dx * rotationAdjustmentFactor,
-            rotate[1] - d3.event.dy * rotationAdjustmentFactor
-        ])
+            geoProjection.rotate([
+                rotate[0] + d3.event.dx * rotationAdjustmentFactor,
+                rotate[1] - d3.event.dy * rotationAdjustmentFactor
+            ])
+        } else {
+            // Pan for 2D map
+            const translate = geoProjection.translate();
+            geoProjection.translate([
+                translate[0] + d3.event.dx,
+                translate[1] + d3.event.dy
+            ]);
+        }
 
         geoPathGenerator = d3.geoPath().projection(geoProjection)
         globeSvg.selectAll("path").attr("d", geoPathGenerator)
     })
     .on("end", () => {
-        rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
+        if (viewMode === "3d") {
+            rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
+        }
     });
 };
 
@@ -222,7 +251,7 @@ function drawLegend(colorPalette) {
         .call(legendAxis);
 };
 
-function configureZoom(globeSvg, initialScale, geoProjection) {
+function configureZoom(globeSvg, initialScale, geoProjection, viewMode) {
     globeSvg.call(d3.zoom()
         .on('zoom', () => {
             if (d3.event.transform.k > ZOOM_SENSITIVITY) {
@@ -230,8 +259,10 @@ function configureZoom(globeSvg, initialScale, geoProjection) {
                 geoProjection.scale(newScale);
                 let path = d3.geoPath().projection(geoProjection);
                 globeSvg.selectAll("path").attr("d", path);
-                globeSvg.selectAll("circle").attr("d", path);
-                globeSvg.selectAll("circle").attr("r", geoProjection.scale());
+                if (viewMode === "3d") {
+                    globeSvg.selectAll("circle").attr("d", path);
+                    globeSvg.selectAll("circle").attr("r", geoProjection.scale());
+                }
             } else {
                 d3.event.transform.k = ZOOM_SENSITIVITY;
             }
@@ -262,6 +293,35 @@ function resizeGlobe(geoProjection, globeSvg, globeCanvas, geoPathGenerator) {
 
 };
 
+// TOGGLE VIEW FUNCTION
+// ----------------------------------------
+function toggleView() {
+    // Stop any rotation timer
+    if (rotationTimer) {
+        rotationTimer.stop();
+    }
+
+    // Clear the current visualization
+    d3.select("#globe-container").selectAll("*").remove();
+
+    // Toggle the view mode
+    currentViewMode = currentViewMode === "3d" ? "2d" : "3d";
+
+    // Update button text
+    const toggleButton = d3.select("#toggle-text");
+    if (currentViewMode === "3d") {
+        toggleButton.text("2D Map View");
+    } else {
+        toggleButton.text("3D Globe View");
+    }
+
+    // Redraw with new view mode
+    drawGlobe(currentViewMode);
+}
+
 // INIT
 // ----------------------------------------
-drawGlobe();
+drawGlobe(currentViewMode);
+
+// Set up toggle button event listener
+d3.select("#view-toggle-btn").on("click", toggleView);
