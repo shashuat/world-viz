@@ -50,6 +50,40 @@
 
     <div id="globe-container"></div>
 
+    <div id="country-detail-panel" style="display: none;">
+        <button id="close-detail-btn" title="Close detail view">✕</button>
+        
+        <div id="country-header">
+            <img id="detail-flag" src="" alt="Country Flag">
+            <div id="country-info">
+                <h2 id="detail-country-name"></h2>
+                <p id="detail-country-stats"></p>
+            </div>
+        </div>
+
+        <div id="charts-container">
+            <div class="chart-box">
+                <h3>Population Over Time</h3>
+                <svg id="population-chart"></svg>
+            </div>
+            
+            <div class="chart-box">
+                <h3>Population Density</h3>
+                <svg id="density-chart"></svg>
+            </div>
+            
+            <div class="chart-box">
+                <h3>Sex Ratio (Males per 100 Females)</h3>
+                <svg id="sex-ratio-chart"></svg>
+            </div>
+            
+            <div class="chart-box">
+                <h3>Median Age</h3>
+                <svg id="median-age-chart"></svg>
+            </div>
+        </div>
+    </div>
+
     <div id="loading-indicator" style="display: none;">
         <div class="spinner"></div>
         <p>Loading data...</p>

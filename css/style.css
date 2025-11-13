@@ -199,6 +199,15 @@ body {
      display: flex;
      justify-content: center;
      align-items: center;
+     transition: all 0.5s ease;
+}
+
+#globe-container.detail-mode {
+     left: 0;
+     right: auto;
+     width: 33.333%;
+     bottom: 0;
+     top: 180px;
 }
 
 #globe-container svg {
@@ -206,6 +215,142 @@ body {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+}
+
+/* Country Detail Panel */
+#country-detail-panel {
+     position: fixed;
+     top: 180px;
+     right: 0;
+     width: 66.666%;
+     bottom: 0;
+     background: #fff;
+     box-shadow: -2px 0 10px rgba(0, 0, 0, 0.2);
+     overflow-y: auto;
+     z-index: 900;
+     transform: translateX(100%);
+     transition: transform 0.5s ease;
+}
+
+#country-detail-panel.active {
+     transform: translateX(0);
+}
+
+#close-detail-btn {
+     position: absolute;
+     top: 20px;
+     right: 20px;
+     background: #5c1010;
+     color: white;
+     border: none;
+     width: 40px;
+     height: 40px;
+     border-radius: 50%;
+     font-size: 20px;
+     line-height: 40px;
+     text-align: center;
+     cursor: pointer;
+     transition: all 0.3s ease;
+     z-index: 10;
+     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+#close-detail-btn:hover {
+     background: #7a1515;
+     transform: rotate(90deg) scale(1.1);
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+#country-header {
+     padding: 30px;
+     background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+     border-bottom: 2px solid #ddd;
+     display: flex;
+     align-items: center;
+     gap: 20px;
+}
+
+#detail-flag {
+     width: 120px;
+     height: 80px;
+     border: 2px solid #ccc;
+     border-radius: 5px;
+     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+     object-fit: cover;
+}
+
+#country-info h2 {
+     margin: 0 0 10px 0;
+     font-size: 28px;
+     color: #333;
+}
+
+#country-info p {
+     margin: 0;
+     font-size: 16px;
+     color: #666;
+     line-height: 1.6;
+}
+
+#charts-container {
+     padding: 30px;
+     display: grid;
+     grid-template-columns: repeat(2, 1fr);
+     gap: 30px;
+}
+
+.chart-box {
+     background: white;
+     border: 1px solid #ddd;
+     border-radius: 8px;
+     padding: 20px;
+     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.chart-box h3 {
+     margin: 0 0 15px 0;
+     font-size: 16px;
+     color: #333;
+     font-weight: 600;
+     text-align: center;
+}
+
+.chart-box svg {
+     width: 100%;
+     height: 250px;
+}
+
+/* Chart styles */
+.line-chart-line {
+     fill: none;
+     stroke: #5c1010;
+     stroke-width: 2px;
+}
+
+.line-chart-area {
+     fill: url(#areaGradient);
+     opacity: 0.3;
+}
+
+.chart-axis path,
+.chart-axis line {
+     stroke: #ccc;
+}
+
+.chart-axis text {
+     fill: #666;
+     font-size: 11px;
+}
+
+.chart-grid line {
+     stroke: #e0e0e0;
+     stroke-dasharray: 2,2;
+}
+
+.chart-dot {
+     fill: #5c1010;
+     stroke: white;
+     stroke-width: 2px;
 }
 
 /* Loading Indicator */
@@ -253,6 +398,11 @@ body {
 .countries {
      stroke: #000;
      stroke-width: 0.25px;
+     cursor: pointer;
+}
+
+.countries path:hover {
+     opacity: 0.8;
 }
 
  #tooltip {

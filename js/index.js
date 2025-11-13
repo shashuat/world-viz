@@ -48,6 +48,13 @@ let isPlaying = false;
 // VIEW MODE VARIABLES
 // ----------------------------------------
 let currentViewMode = "3d"; // "3d" or "2d"
+let selectedCountry = null;
+let isDetailMode = false;
+
+// GLOBE STATE
+// ----------------------------------------
+let currentRotation = [0, -25]; // Store current rotation [longitude, latitude]
+let currentZoomScale = null; // Store current zoom scale
 
 // CACHED DATA
 // ----------------------------------------
@@ -96,14 +103,14 @@ async function drawGlobe(viewMode = "3d") {
     let geoProjection;
     if (viewMode === "3d") {
         geoProjection = d3.geoOrthographic()
-            .scale(GLOBE_RADIUS)
+            .scale(currentZoomScale || GLOBE_RADIUS)
             .center([0, 0])
-            .rotate([0, -25])
+            .rotate(currentRotation)
             .translate(GLOBE_CENTER);
     } else {
         // 2D Map view using Equirectangular projection
         geoProjection = d3.geoEquirectangular()
-            .scale(GLOBE_RADIUS * 0.8)
+            .scale(currentZoomScale || (GLOBE_RADIUS * 0.8))
             .center([0, 0])
             .translate(GLOBE_CENTER);
     }
@@ -150,32 +157,47 @@ async function drawGlobe(viewMode = "3d") {
 
         // Update contry on mouseover & mouseout
         .on("mouseover", function (country) {
-            d3.select(this)
-                .style("fill", COLOR_HOVER)
+            if (!isDetailMode) {
+                d3.select(this)
+                    .style("fill", COLOR_HOVER)
 
-            toolTip.transition()
-                .style("display", "block")
-                .style("left", d3.event.pageX + "px")
-                .style("top", d3.event.pageY + "px");
+                toolTip.transition()
+                    .style("display", "block")
+                    .style("left", d3.event.pageX + "px")
+                    .style("top", d3.event.pageY + "px");
 
-            const countryDict = {
-                name: country.properties.name,
-                code: country.id,
-                ranking: getCountryProperty(country.id, "rank", contextData),
-                population: getCountryProperty(country.id, "population", contextData),
-                density: getCountryProperty(country.id, "population_density", contextData) + " per km²",
-                sexRatio: getCountryProperty(country.id, "sex_ratio", contextData),
-                medianAge: getCountryProperty(country.id, "median_age", contextData) + " years",
-            };
+                const countryDict = {
+                    name: country.properties.name,
+                    code: country.id,
+                    ranking: getCountryProperty(country.id, "rank", contextData),
+                    population: getCountryProperty(country.id, "population", contextData),
+                    density: getCountryProperty(country.id, "population_density", contextData) + " per km²",
+                    sexRatio: getCountryProperty(country.id, "sex_ratio", contextData),
+                    medianAge: getCountryProperty(country.id, "median_age", contextData) + " years",
+                };
 
-            updateTooltipContent(countryDict);
+                updateTooltipContent(countryDict);
+            }
         })
         .on("mouseout", function () {
-            d3.select(this)
-                .style("fill", country => getColor(country, contextData, colorPalette))
+            if (!isDetailMode) {
+                d3.select(this)
+                    .style("fill", country => getColor(country, contextData, colorPalette))
 
-            toolTip.transition()
-                .style("display", "none");
+                toolTip.transition()
+                    .style("display", "none");
+            }
+        })
+        .on("click", function(country) {
+            // Prevent event bubbling
+            d3.event.stopPropagation();
+            
+            // Handle country click for detail view
+            const countryCode = country.id;
+            const countryName = country.properties.name;
+            
+            console.log("Country clicked:", countryName, countryCode);
+            showCountryDetail(countryCode, countryName);
         });
 
     // Optional rotate (only for 3D view)
@@ -265,11 +287,16 @@ function createDrag(geoProjection, globeSvg, geoPathGenerator, viewMode) {
             rotate[0] + d3.event.dx * rotationAdjustmentFactor,
             rotate[1] - d3.event.dy * rotationAdjustmentFactor
         ])
+        
+        // Save current rotation
+        currentRotation = geoProjection.rotate();
 
         geoPathGenerator = d3.geoPath().projection(geoProjection)
         globeSvg.selectAll("path").attr("d", geoPathGenerator)
     })
     .on("end", () => {
+        // Save final rotation state
+        currentRotation = geoProjection.rotate();
         rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
     });
 };
@@ -284,6 +311,10 @@ function rotateGlobe(geoProjection, globeSvg, geoPathGenerator) {
             rotate[0] - 1 * rotationAdjustmentFactor,
             rotate[1]
         ])
+        
+        // Save current rotation
+        currentRotation = geoProjection.rotate();
+        
         geoPathGenerator = d3.geoPath().projection(geoProjection)
         globeSvg.selectAll("path").attr("d", geoPathGenerator)
     });
@@ -382,6 +413,10 @@ function configureZoom(globeSvg, initialScale, geoProjection, viewMode) {
             if (d3.event.transform.k > ZOOM_SENSITIVITY) {
                 let newScale = initialScale * d3.event.transform.k;
                 geoProjection.scale(newScale);
+                
+                // Save current zoom scale
+                currentZoomScale = newScale;
+                
                 let path = d3.geoPath().projection(geoProjection);
                 globeSvg.selectAll("path").attr("d", path);
                 if (viewMode === "3d") {
@@ -407,6 +442,9 @@ function toggleView() {
 
     // Toggle the view mode
     currentViewMode = currentViewMode === "3d" ? "2d" : "3d";
+    
+    // Reset zoom scale when switching views
+    currentZoomScale = null;
 
     // Update button text
     const toggleButton = d3.select("#toggle-text");
@@ -502,6 +540,9 @@ resetBtn.addEventListener("click", () => {
     updateVisualization();
 });
 
+// Close detail panel button
+document.getElementById("close-detail-btn").addEventListener("click", closeCountryDetail);
+
 // Helper function to update visualization
 function updateVisualization() {
     // Stop rotation if active
@@ -509,9 +550,296 @@ function updateVisualization() {
         rotationTimer.stop();
     }
     
-    // Clear and redraw
-    d3.select("#globe-container").selectAll("*").remove();
-    drawGlobe(currentViewMode);
+    // Instead of clearing and redrawing, just update the data and colors
+    updateGlobeData();
+}
+
+// Update globe data without resetting position
+async function updateGlobeData() {
+    if (!cachedRawData) return;
+    
+    const rawData = cachedRawData;
+    
+    // Filter for Country/Area entries in the specified year
+    const contextData = rawData
+        .filter(d => d.Type === "Country/Area" && +d.Year === DATA_YEAR)
+        .map((d, index) => ({
+            rank: index + 1,
+            country: d["Region, subregion, country or area *"],
+            alpha3_code: d["ISO3 Alpha-code"],
+            population_number: +(d["Total Population, as of 1 July (thousands)"].replace(/[^0-9.]/g, "") * 1000),
+            population: formatPopulation(+(d["Total Population, as of 1 July (thousands)"].replace(/[^0-9.]/g, "") * 1000)),
+            sex_ratio: d["Population Sex Ratio, as of 1 July (males per 100 females)"],
+            sex_ratio_number: parseFloat(d["Population Sex Ratio, as of 1 July (males per 100 females)"].replace(/[^0-9.]/g, "")) || 100,
+            population_density: d["Population Density, as of 1 July (persons per square km)"],
+            population_density_number: parseFloat(d["Population Density, as of 1 July (persons per square km)"].replace(/[^0-9.]/g, "")) || 0,
+            median_age: d["Median Age, as of 1 July (years)"],
+            median_age_number: parseFloat(d["Median Age, as of 1 July (years)"].replace(/[^0-9.]/g, "")) || 0
+        }))
+        .filter(d => d.alpha3_code && d.population_number > 0)
+        .sort((a, b) => b.population_number - a.population_number)
+        .map((d, index) => ({ ...d, rank: index + 1 }));
+    
+    const colorPalette = createColorPalette(contextData);
+    
+    // Update country colors with smooth transition
+    d3.selectAll(".countries path")
+        .transition()
+        .duration(300)
+        .style("fill", country => getColor(country, contextData, colorPalette));
+    
+    // Update legend
+    drawLegend(colorPalette);
+    
+    // Resume rotation if in 3D mode and not in detail mode
+    if (currentViewMode === "3d" && !isDetailMode) {
+        const globeSvg = d3.select("#globe-container svg");
+        const geoProjection = d3.geoOrthographic()
+            .scale(currentZoomScale || GLOBE_RADIUS)
+            .center([0, 0])
+            .rotate(currentRotation)
+            .translate(GLOBE_CENTER);
+        const geoPathGenerator = d3.geoPath().projection(geoProjection);
+        
+        rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
+    }
+}
+
+// Country Detail Functions
+// ----------------------------------------
+function showCountryDetail(countryCode, countryName) {
+    console.log("showCountryDetail called:", countryCode, countryName);
+    
+    selectedCountry = countryCode;
+    isDetailMode = true;
+    
+    // Hide tooltip
+    d3.select("#tooltip").style("display", "none");
+    
+    // Show detail panel
+    const detailPanel = document.getElementById("country-detail-panel");
+    detailPanel.style.display = "block";
+    
+    // Force reflow before adding active class
+    setTimeout(() => {
+        detailPanel.classList.add("active");
+    }, 10);
+    
+    // Resize globe container
+    const globeContainer = document.getElementById("globe-container");
+    globeContainer.classList.add("detail-mode");
+    
+    // Get country data across all years
+    const countryData = cachedRawData.filter(d => 
+        d.Type === "Country/Area" && d["ISO3 Alpha-code"] === countryCode
+    ).map(d => ({
+        year: +d.Year,
+        population: +(d["Total Population, as of 1 July (thousands)"].replace(/[^0-9.]/g, "") * 1000),
+        density: parseFloat(d["Population Density, as of 1 July (persons per square km)"].replace(/[^0-9.]/g, "")) || 0,
+        sexRatio: parseFloat(d["Population Sex Ratio, as of 1 July (males per 100 females)"].replace(/[^0-9.]/g, "")) || 100,
+        medianAge: parseFloat(d["Median Age, as of 1 July (years)"].replace(/[^0-9.]/g, "")) || 0
+    })).sort((a, b) => a.year - b.year);
+    
+    console.log("Country data points:", countryData.length);
+    
+    if (countryData.length === 0) {
+        console.error("No data found for country:", countryCode);
+        return;
+    }
+    
+    // Update header
+    document.getElementById("detail-country-name").textContent = countryName;
+    document.getElementById("detail-flag").src = `${FLAG_PATH}${countryCode}.png`;
+    
+    const latestData = countryData[countryData.length - 1];
+    document.getElementById("detail-country-stats").innerHTML = `
+        Population: <strong>${formatPopulation(latestData.population)}</strong> | 
+        Density: <strong>${latestData.density.toFixed(1)} per km²</strong> | 
+        Sex Ratio: <strong>${latestData.sexRatio.toFixed(1)}</strong> | 
+        Median Age: <strong>${latestData.medianAge.toFixed(1)} years</strong>
+    `;
+    
+    // Draw charts with a small delay to ensure panel is visible
+    setTimeout(() => {
+        console.log("Drawing charts...");
+        drawLineChart(countryData, "population", "population-chart", "Population");
+        drawLineChart(countryData, "density", "density-chart", "Density (per km²)");
+        drawLineChart(countryData, "sexRatio", "sex-ratio-chart", "Sex Ratio");
+        drawLineChart(countryData, "medianAge", "median-age-chart", "Median Age (years)");
+    }, 100);
+    
+    // Update globe dimensions for smaller view
+    setTimeout(() => {
+        GLOBE_WIDTH = globeContainer.getBoundingClientRect().width;
+        GLOBE_HEIGHT = window.innerHeight - 180;
+        GLOBE_RADIUS = Math.min(GLOBE_WIDTH, GLOBE_HEIGHT) / 3;
+        GLOBE_CENTER = [GLOBE_WIDTH / 2, GLOBE_HEIGHT / 2];
+        
+        if (rotationTimer) rotationTimer.stop();
+        d3.select("#globe-container").selectAll("*").remove();
+        drawGlobe(currentViewMode);
+    }, 500);
+}
+
+function closeCountryDetail() {
+    console.log("Closing country detail panel");
+    
+    selectedCountry = null;
+    isDetailMode = false;
+    
+    // Hide detail panel
+    const detailPanel = document.getElementById("country-detail-panel");
+    detailPanel.classList.remove("active");
+    
+    // Wait for animation to complete before hiding
+    setTimeout(() => {
+        detailPanel.style.display = "none";
+    }, 500);
+    
+    // Restore globe container
+    const globeContainer = document.getElementById("globe-container");
+    globeContainer.classList.remove("detail-mode");
+    
+    // Restore globe dimensions
+    setTimeout(() => {
+        GLOBE_WIDTH = globeContainer.getBoundingClientRect().width;
+        GLOBE_HEIGHT = window.innerHeight - 180;
+        GLOBE_RADIUS = GLOBE_HEIGHT / 2.8;
+        GLOBE_CENTER = [GLOBE_WIDTH / 2, GLOBE_HEIGHT / 2];
+        
+        if (rotationTimer) rotationTimer.stop();
+        d3.select("#globe-container").selectAll("*").remove();
+        drawGlobe(currentViewMode);
+    }, 500);
+}
+
+function drawLineChart(data, metric, chartId, yLabel) {
+    const svg = d3.select(`#${chartId}`);
+    svg.selectAll("*").remove();
+    
+    // Get the parent container's dimensions
+    const container = svg.node().parentElement;
+    const containerWidth = container.getBoundingClientRect().width;
+    const containerHeight = 250; // Fixed height for charts
+    
+    // Set SVG dimensions explicitly
+    svg.attr("width", containerWidth)
+       .attr("height", containerHeight);
+    
+    const margin = {top: 20, right: 30, bottom: 40, left: 60};
+    const width = containerWidth - margin.left - margin.right;
+    const height = containerHeight - margin.top - margin.bottom;
+    
+    const g = svg.append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+    
+    // Create scales
+    const x = d3.scaleLinear()
+        .domain(d3.extent(data, d => d.year))
+        .range([0, width]);
+    
+    const y = d3.scaleLinear()
+        .domain([0, d3.max(data, d => d[metric]) * 1.1])
+        .range([height, 0]);
+    
+    // Add gradient
+    const gradient = svg.append("defs")
+        .append("linearGradient")
+        .attr("id", `areaGradient-${chartId}`)
+        .attr("x1", "0%")
+        .attr("y1", "0%")
+        .attr("x2", "0%")
+        .attr("y2", "100%");
+    
+    gradient.append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", "#5c1010")
+        .attr("stop-opacity", 0.3);
+    
+    gradient.append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", "#5c1010")
+        .attr("stop-opacity", 0);
+    
+    // Add grid lines
+    g.append("g")
+        .attr("class", "chart-grid")
+        .selectAll("line")
+        .data(y.ticks(5))
+        .enter().append("line")
+        .attr("x1", 0)
+        .attr("x2", width)
+        .attr("y1", d => y(d))
+        .attr("y2", d => y(d));
+    
+    // Create area
+    const area = d3.area()
+        .x(d => x(d.year))
+        .y0(height)
+        .y1(d => y(d[metric]))
+        .curve(d3.curveMonotoneX);
+    
+    // Create line
+    const line = d3.line()
+        .x(d => x(d.year))
+        .y(d => y(d[metric]))
+        .curve(d3.curveMonotoneX);
+    
+    // Add area
+    g.append("path")
+        .datum(data)
+        .attr("class", "line-chart-area")
+        .attr("d", area)
+        .style("fill", `url(#areaGradient-${chartId})`);
+    
+    // Add line
+    g.append("path")
+        .datum(data)
+        .attr("class", "line-chart-line")
+        .attr("d", line);
+    
+    // Add dots
+    g.selectAll(".chart-dot")
+        .data(data.filter((d, i) => i % 5 === 0 || i === data.length - 1))
+        .enter().append("circle")
+        .attr("class", "chart-dot")
+        .attr("cx", d => x(d.year))
+        .attr("cy", d => y(d[metric]))
+        .attr("r", 3);
+    
+    // Add axes
+    const xAxis = d3.axisBottom(x)
+        .tickFormat(d3.format("d"))
+        .ticks(6);
+    
+    const yAxis = d3.axisLeft(y)
+        .ticks(5)
+        .tickFormat(d => {
+            if (metric === "population") {
+                return d3.format(".2s")(d);
+            }
+            return d3.format(".1f")(d);
+        });
+    
+    g.append("g")
+        .attr("class", "chart-axis")
+        .attr("transform", `translate(0,${height})`)
+        .call(xAxis);
+    
+    g.append("g")
+        .attr("class", "chart-axis")
+        .call(yAxis);
+    
+    // Add Y axis label
+    g.append("text")
+        .attr("transform", "rotate(-90)")
+        .attr("y", 0 - margin.left)
+        .attr("x", 0 - (height / 2))
+        .attr("dy", "1em")
+        .style("text-anchor", "middle")
+        .style("font-size", "12px")
+        .style("fill", "#666")
+        .text(yLabel);
 }
 
 // Handle window resize
@@ -526,12 +854,15 @@ window.addEventListener("resize", () => {
         GLOBE_RADIUS = GLOBE_HEIGHT / 2.8;
         GLOBE_CENTER = [GLOBE_WIDTH / 2, GLOBE_HEIGHT / 2];
         
+        // Reset zoom scale on resize
+        currentZoomScale = null;
+        
         // Stop rotation if active
         if (rotationTimer) {
             rotationTimer.stop();
         }
         
-        // Clear and redraw
+        // Clear and redraw (resize needs full redraw)
         d3.select("#globe-container").selectAll("*").remove();
         drawGlobe(currentViewMode);
     }, 250);
