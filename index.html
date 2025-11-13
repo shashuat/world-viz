@@ -10,16 +10,50 @@
     <link rel="icon" href="img/globe.ico">
 </head>
 <body>
-    <div id="header">
-        <h1 id="page-title">2021 World Population Visualization</h1>
+    <nav id="navbar">
+        <div id="nav-left">
+            <h1 id="page-title">World Demographics Visualization</h1>
+        </div>
+        <div id="nav-center">
+            <div id="mode-selector">
+                <button class="mode-btn active" data-mode="population">Population</button>
+                <button class="mode-btn" data-mode="density">Population Density</button>
+                <button class="mode-btn" data-mode="sex-ratio">Sex Ratio</button>
+                <button class="mode-btn" data-mode="median-age">Median Age</button>
+            </div>
+        </div>
+        <div id="nav-right">
+            <button id="view-toggle-btn" title="Toggle between 3D Globe and 2D Map">
+                <span id="toggle-text">2D Map View</span>
+            </button>
+        </div>
+    </nav>
+
+    <div id="controls-panel">
+        <div id="year-control">
+            <label for="year-slider">
+                <span id="year-label">Year: <strong id="current-year">2023</strong></span>
+            </label>
+            <div id="slider-container">
+                <span class="year-mark">1950</span>
+                <input type="range" id="year-slider" min="1950" max="2023" value="2023" step="1">
+                <span class="year-mark">2023</span>
+            </div>
+            <div id="playback-controls">
+                <button id="play-btn" title="Play animation">▶</button>
+                <button id="pause-btn" title="Pause animation" style="display: none;">⏸</button>
+                <button id="reset-btn" title="Reset to 2023">⟲</button>
+            </div>
+        </div>
         <div id="color-scale"></div>
     </div>
 
-    <button id="view-toggle-btn" title="Toggle between 3D Globe and 2D Map">
-        <span id="toggle-text">2D Map View</span>
-    </button>
-
     <div id="globe-container"></div>
+
+    <div id="loading-indicator" style="display: none;">
+        <div class="spinner"></div>
+        <p>Loading data...</p>
+    </div>
 
     <div id="tooltip" style="display: none;">
         <div id="name-flag-container">
@@ -32,7 +66,9 @@
         <br/>
         Density: <span id="tooltip-density"></span>
         <br/>
-        Area: <span id="tooltip-area"></span>
+        Sex Ratio: <span id="tooltip-sex-ratio"></span>
+        <br/>
+        Median Age: <span id="tooltip-median-age"></span>
     </div>
 
     <!-- IMPORT D3 V.5 -->

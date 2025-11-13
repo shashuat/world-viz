@@ -11,12 +11,19 @@
 // DATA SOURCES
 // ----------------------------------------
 const GEO_JSON_PATH = "data/globeCoordinates.json";
-const DATA_CSV_PATH = "data/worldPopulation.csv";
+const DATA_CSV_PATH = "data/world-demographic.csv";
 const FLAG_PATH = "./img/flags/";
+let DATA_YEAR = 2023; // Year to visualize
+let VISUALIZATION_MODE = "population"; // Current visualization mode: population, density, sex-ratio, median-age
 
 //  CLOROPLETH MAP VARIABLES
 // ----------------------------------------
-const COLOR_RANGE = ["#ffffff", "#5c1010"];
+const COLOR_RANGES = {
+    population: ["#ffffff", "#5c1010"],
+    density: ["#ffffff", "#1e5c8b"],
+    "sex-ratio": ["#8b1e5c", "#ffffff", "#1e5c8b"], // Low (more female) to high (more male)
+    "median-age": ["#5c8b1e", "#ffffff", "#8b5c1e"] // Young to old
+};
 const COLOR_NO_DATA = "#B2B2B2";
 const COLOR_HOVER = "#D3D3D3"
 const COLOR_SCALE = "linear"; // "linear" or "log"
@@ -25,7 +32,7 @@ const COLOR_SCALE = "linear"; // "linear" or "log"
 // ----------------------------------------
 const GLOBE_CONTAINER = d3.select("#globe-container");
 let GLOBE_WIDTH = GLOBE_CONTAINER.node().getBoundingClientRect().width;
-let GLOBE_HEIGHT = GLOBE_CONTAINER.node().getBoundingClientRect().height;
+let GLOBE_HEIGHT = window.innerHeight - 180; // Account for navbar (70px) and controls (110px)
 let GLOBE_RADIUS = GLOBE_HEIGHT / 2.8;
 let GLOBE_CENTER = [GLOBE_WIDTH / 2, GLOBE_HEIGHT / 2];
 
@@ -35,18 +42,53 @@ let GLOBE_CENTER = [GLOBE_WIDTH / 2, GLOBE_HEIGHT / 2];
 const ROTATION_SENSITIVITY = 60;
 const ZOOM_SENSITIVITY = 0.5;
 let rotationTimer;
+let animationTimer;
+let isPlaying = false;
 
 // VIEW MODE VARIABLES
 // ----------------------------------------
 let currentViewMode = "3d"; // "3d" or "2d"
+
+// CACHED DATA
+// ----------------------------------------
+let cachedGeoJson = null;
+let cachedRawData = null;
 
 // MAIN FUNCTION
 // ----------------------------------------
 async function drawGlobe(viewMode = "3d") {
 
     // Init variables
-    const geoJson = await d3.json(GEO_JSON_PATH);
-    const contextData = await d3.csv(DATA_CSV_PATH);
+    if (!cachedGeoJson) {
+        cachedGeoJson = await d3.json(GEO_JSON_PATH);
+    }
+    if (!cachedRawData) {
+        cachedRawData = await d3.csv(DATA_CSV_PATH);
+    }
+    
+    const geoJson = cachedGeoJson;
+    const rawData = cachedRawData;
+    
+    // Filter for Country/Area entries in the specified year
+    const contextData = rawData
+        .filter(d => d.Type === "Country/Area" && +d.Year === DATA_YEAR)
+        .map((d, index) => ({
+            rank: index + 1,
+            country: d["Region, subregion, country or area *"],
+            alpha3_code: d["ISO3 Alpha-code"],
+            population_number: +(d["Total Population, as of 1 July (thousands)"].replace(/[^0-9.]/g, "") * 1000),
+            population: formatPopulation(+(d["Total Population, as of 1 July (thousands)"].replace(/[^0-9.]/g, "") * 1000)),
+            sex_ratio: d["Population Sex Ratio, as of 1 July (males per 100 females)"],
+            sex_ratio_number: parseFloat(d["Population Sex Ratio, as of 1 July (males per 100 females)"].replace(/[^0-9.]/g, "")) || 100,
+            population_density: d["Population Density, as of 1 July (persons per square km)"],
+            population_density_number: parseFloat(d["Population Density, as of 1 July (persons per square km)"].replace(/[^0-9.]/g, "")) || 0,
+            median_age: d["Median Age, as of 1 July (years)"],
+            median_age_number: parseFloat(d["Median Age, as of 1 July (years)"].replace(/[^0-9.]/g, "")) || 0
+        }))
+        .filter(d => d.alpha3_code && d.population_number > 0)
+        .sort((a, b) => b.population_number - a.population_number)
+        .map((d, index) => ({ ...d, rank: index + 1 }));
+    
     const colorPalette = createColorPalette(contextData);
     const toolTip = d3.select("#tooltip")
 
@@ -74,7 +116,7 @@ async function drawGlobe(viewMode = "3d") {
         .attr("width", GLOBE_WIDTH)
         .attr("height", GLOBE_HEIGHT);
 
-    drawLegend(globeSvg, colorPalette);
+    drawLegend(colorPalette);
 
     // Convert geoJson data to svg path
     const geoPathGenerator = d3.geoPath().projection(geoProjection);
@@ -103,6 +145,7 @@ async function drawGlobe(viewMode = "3d") {
         .selectAll("path")
         .data(geoJson.features)
         .enter().append("path")
+        .attr("d", geoPathGenerator)
         .style("fill", country => getColor(country, contextData, colorPalette))
 
         // Update contry on mouseover & mouseout
@@ -120,8 +163,9 @@ async function drawGlobe(viewMode = "3d") {
                 code: country.id,
                 ranking: getCountryProperty(country.id, "rank", contextData),
                 population: getCountryProperty(country.id, "population", contextData),
-                density: getCountryProperty(country.id, "population_density", contextData),
-                area: getCountryProperty(country.id, "area", contextData),
+                density: getCountryProperty(country.id, "population_density", contextData) + " per km²",
+                sexRatio: getCountryProperty(country.id, "sex_ratio", contextData),
+                medianAge: getCountryProperty(country.id, "median_age", contextData) + " years",
             };
 
             updateTooltipContent(countryDict);
@@ -138,20 +182,61 @@ async function drawGlobe(viewMode = "3d") {
     if (viewMode === "3d") {
         rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
     }
-
-    window.addEventListener("resize", () => {
-        resizeGlobe(geoProjection, globeSvg, contextData, geoPathGenerator);
-    });
 };
 
 // HELPER FUNCTIONS
 // ----------------------------------------
+function formatPopulation(num) {
+    if (num >= 1000000000) {
+        return (num / 1000000000).toFixed(2) + " billion";
+    } else if (num >= 1000000) {
+        return (num / 1000000).toFixed(2) + " million";
+    } else if (num >= 1000) {
+        return (num / 1000).toFixed(2) + " thousand";
+    }
+    return num.toString();
+}
+
 function createColorPalette(data) {
     let scale;
-    const [minValue, maxValue] = d3.extent(data, function (d) { return +d.population_number; });
-    if (COLOR_SCALE === "log") {
+    const COLOR_RANGE = COLOR_RANGES[VISUALIZATION_MODE];
+    
+    let dataValues;
+    switch(VISUALIZATION_MODE) {
+        case "population":
+            dataValues = data.map(d => d.population_number);
+            break;
+        case "density":
+            dataValues = data.map(d => d.population_density_number);
+            break;
+        case "sex-ratio":
+            dataValues = data.map(d => d.sex_ratio_number);
+            break;
+        case "median-age":
+            dataValues = data.map(d => d.median_age_number);
+            break;
+        default:
+            dataValues = data.map(d => d.population_number);
+    }
+    
+    const [minValue, maxValue] = d3.extent(dataValues.filter(v => v > 0));
+    
+    if (COLOR_SCALE === "log" && VISUALIZATION_MODE === "population") {
         scale = d3.scaleLog()
-    } else if (COLOR_SCALE === "linear") {
+    } else if (VISUALIZATION_MODE === "sex-ratio") {
+        // Diverging scale for sex ratio (centered around 100)
+        scale = d3.scaleLinear()
+            .domain([minValue, 100, maxValue])
+            .range(COLOR_RANGE);
+        return scale;
+    } else if (VISUALIZATION_MODE === "median-age") {
+        // Diverging scale for median age
+        const midValue = (minValue + maxValue) / 2;
+        scale = d3.scaleLinear()
+            .domain([minValue, midValue, maxValue])
+            .range(COLOR_RANGE);
+        return scale;
+    } else {
         scale = d3.scaleLinear()
     }
     return scale
@@ -160,35 +245,32 @@ function createColorPalette(data) {
 };
 
 function createDrag(geoProjection, globeSvg, geoPathGenerator, viewMode) {
+    // Only enable drag for 3D view
+    if (viewMode === "2d") {
+        return d3.drag()
+            .on("start", null)
+            .on("drag", null)
+            .on("end", null);
+    }
+    
     return d3.drag().on("start", () => {
         if (rotationTimer) rotationTimer.stop();
     })
     .on("drag", () => {
-        if (viewMode === "3d") {
-            // Rotate for 3D globe
-            const rotate = geoProjection.rotate()
-            const rotationAdjustmentFactor = ROTATION_SENSITIVITY / geoProjection.scale()
+        // Rotate for 3D globe
+        const rotate = geoProjection.rotate()
+        const rotationAdjustmentFactor = ROTATION_SENSITIVITY / geoProjection.scale()
 
-            geoProjection.rotate([
-                rotate[0] + d3.event.dx * rotationAdjustmentFactor,
-                rotate[1] - d3.event.dy * rotationAdjustmentFactor
-            ])
-        } else {
-            // Pan for 2D map
-            const translate = geoProjection.translate();
-            geoProjection.translate([
-                translate[0] + d3.event.dx,
-                translate[1] + d3.event.dy
-            ]);
-        }
+        geoProjection.rotate([
+            rotate[0] + d3.event.dx * rotationAdjustmentFactor,
+            rotate[1] - d3.event.dy * rotationAdjustmentFactor
+        ])
 
         geoPathGenerator = d3.geoPath().projection(geoProjection)
         globeSvg.selectAll("path").attr("d", geoPathGenerator)
     })
     .on("end", () => {
-        if (viewMode === "3d") {
-            rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
-        }
+        rotateGlobe(geoProjection, globeSvg, geoPathGenerator);
     });
 };
 
@@ -216,23 +298,53 @@ function getCountryProperty(alpha3_code, property, contextData) {
 
 function getColor(d, contextData, colorPalette) {
     const countryData = contextData.filter(datum => datum.alpha3_code == d.id);
-    return countryData.length > 0 ? colorPalette(countryData[0].population_number) : COLOR_NO_DATA;
+    if (countryData.length === 0) return COLOR_NO_DATA;
+    
+    let value;
+    switch(VISUALIZATION_MODE) {
+        case "population":
+            value = countryData[0].population_number;
+            break;
+        case "density":
+            value = countryData[0].population_density_number;
+            break;
+        case "sex-ratio":
+            value = countryData[0].sex_ratio_number;
+            break;
+        case "median-age":
+            value = countryData[0].median_age_number;
+            break;
+        default:
+            value = countryData[0].population_number;
+    }
+    
+    return value > 0 ? colorPalette(value) : COLOR_NO_DATA;
 };
 
 function updateTooltipContent(country) {
     d3.select("#tooltip-country-name").text(country.name);
     d3.select("#tooltip-flag").attr("src", `${FLAG_PATH}${country.code}.png`);
-    d3.select("#tooltip-rank").text(country.ranking);
-    d3.select("#tooltip-population").text(country.population);
-    d3.select("#tooltip-density").text(country.density);
-    d3.select("#tooltip-area").text(country.area);
+    d3.select("#tooltip-rank").text(country.ranking || "N/A");
+    d3.select("#tooltip-population").text(country.population || "N/A");
+    d3.select("#tooltip-density").text(country.density || "N/A");
+    d3.select("#tooltip-sex-ratio").text(country.sexRatio || "N/A");
+    d3.select("#tooltip-median-age").text(country.medianAge || "N/A");
 };
 
 function drawLegend(colorPalette) {
     let colorScale = d3.select("#color-scale");
 
+    // Clear any existing legend
+    colorScale.selectAll("svg").remove();
+
     // Set color background gradient
-    colorScale.style("background", `linear-gradient(to right, ${COLOR_RANGE[0]}, ${COLOR_RANGE[1]})`);
+    const COLOR_RANGE = COLOR_RANGES[VISUALIZATION_MODE];
+    if (COLOR_RANGE.length === 3) {
+        // Diverging scale
+        colorScale.style("background", `linear-gradient(to right, ${COLOR_RANGE[0]}, ${COLOR_RANGE[1]}, ${COLOR_RANGE[2]})`);
+    } else {
+        colorScale.style("background", `linear-gradient(to right, ${COLOR_RANGE[0]}, ${COLOR_RANGE[1]})`);
+    }
 
     const legendWidth = colorScale.node().getBoundingClientRect().width;
 
@@ -241,14 +353,27 @@ function drawLegend(colorPalette) {
 
     const legendAxis = d3.axisBottom(xScale)
         .ticks(5)
-        .tickFormat(d => d3.format(".2s")(d));
+        .tickFormat(d => {
+            if (VISUALIZATION_MODE === "sex-ratio") {
+                return d.toFixed(1);
+            } else if (VISUALIZATION_MODE === "median-age") {
+                return d.toFixed(0) + "y";
+            } else if (VISUALIZATION_MODE === "density") {
+                return d3.format(".0f")(d);
+            } else {
+                return d3.format(".2s")(d);
+            }
+        });
 
     const legendSvg = d3.select("#color-scale").append("svg")
     const legendHeight = legendSvg.node().getBoundingClientRect().height;
 
     legendSvg.append('g')
-        .attr("transform", `translate(0, ${legendHeight / 10})`)
-        .call(legendAxis);
+        .attr("transform", `translate(0, ${legendHeight / 4})`)
+        .call(legendAxis)
+        .selectAll("text")
+        .style("fill", "#333")
+        .style("font-size", "11px");
 };
 
 function configureZoom(globeSvg, initialScale, geoProjection, viewMode) {
@@ -267,30 +392,6 @@ function configureZoom(globeSvg, initialScale, geoProjection, viewMode) {
                 d3.event.transform.k = ZOOM_SENSITIVITY;
             }
         }));
-};
-
-function resizeGlobe(geoProjection, globeSvg, globeCanvas, geoPathGenerator) {
-    GLOBE_WIDTH = GLOBE_CONTAINER.node().getBoundingClientRect().width;
-    GLOBE_HEIGHT = GLOBE_CONTAINER.node().getBoundingClientRect().height;
-
-    GLOBE_CENTER = [GLOBE_WIDTH / 2, GLOBE_HEIGHT / 2];
-
-    geoProjection
-        .scale(GLOBE_RADIUS)
-        .translate(GLOBE_CENTER);
-
-    // Update the svg and canvas dimensions
-    globeSvg.attr("width", GLOBE_WIDTH).attr("height", GLOBE_HEIGHT);
-
-    // Redraw the globe and markers
-    globeSvg.selectAll("path").attr("d", geoPathGenerator);
-
-    // Center the circle
-    globeSvg.select("#globe")
-        .attr("cx", GLOBE_WIDTH / 2)
-        .attr("cy", GLOBE_HEIGHT / 2)
-        .attr("r", geoProjection.scale());
-
 };
 
 // TOGGLE VIEW FUNCTION
@@ -325,3 +426,113 @@ drawGlobe(currentViewMode);
 
 // Set up toggle button event listener
 d3.select("#view-toggle-btn").on("click", toggleView);
+
+// Year slider event listener
+const yearSlider = document.getElementById("year-slider");
+const currentYearDisplay = document.getElementById("current-year");
+
+yearSlider.addEventListener("input", (e) => {
+    DATA_YEAR = parseInt(e.target.value);
+    currentYearDisplay.textContent = DATA_YEAR;
+});
+
+yearSlider.addEventListener("change", (e) => {
+    DATA_YEAR = parseInt(e.target.value);
+    updateVisualization();
+});
+
+// Mode selector event listeners
+document.querySelectorAll(".mode-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+        // Remove active class from all buttons
+        document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+        
+        // Add active class to clicked button
+        e.target.classList.add("active");
+        
+        // Update visualization mode
+        VISUALIZATION_MODE = e.target.dataset.mode;
+        updateVisualization();
+    });
+});
+
+// Playback controls
+const playBtn = document.getElementById("play-btn");
+const pauseBtn = document.getElementById("pause-btn");
+const resetBtn = document.getElementById("reset-btn");
+
+playBtn.addEventListener("click", () => {
+    isPlaying = true;
+    playBtn.style.display = "none";
+    pauseBtn.style.display = "inline-block";
+    
+    animationTimer = setInterval(() => {
+        if (DATA_YEAR < 2023) {
+            DATA_YEAR++;
+            yearSlider.value = DATA_YEAR;
+            currentYearDisplay.textContent = DATA_YEAR;
+            updateVisualization();
+        } else {
+            // Stop at the end
+            isPlaying = false;
+            playBtn.style.display = "inline-block";
+            pauseBtn.style.display = "none";
+            clearInterval(animationTimer);
+        }
+    }, 500); // Update every 500ms
+});
+
+pauseBtn.addEventListener("click", () => {
+    isPlaying = false;
+    playBtn.style.display = "inline-block";
+    pauseBtn.style.display = "none";
+    clearInterval(animationTimer);
+});
+
+resetBtn.addEventListener("click", () => {
+    if (isPlaying) {
+        clearInterval(animationTimer);
+        isPlaying = false;
+        playBtn.style.display = "inline-block";
+        pauseBtn.style.display = "none";
+    }
+    DATA_YEAR = 2023;
+    yearSlider.value = 2023;
+    currentYearDisplay.textContent = 2023;
+    updateVisualization();
+});
+
+// Helper function to update visualization
+function updateVisualization() {
+    // Stop rotation if active
+    if (rotationTimer) {
+        rotationTimer.stop();
+    }
+    
+    // Clear and redraw
+    d3.select("#globe-container").selectAll("*").remove();
+    drawGlobe(currentViewMode);
+}
+
+// Handle window resize
+let resizeTimeout;
+window.addEventListener("resize", () => {
+    // Debounce resize events
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+        // Update globe dimensions
+        GLOBE_WIDTH = GLOBE_CONTAINER.node().getBoundingClientRect().width;
+        GLOBE_HEIGHT = window.innerHeight - 180;
+        GLOBE_RADIUS = GLOBE_HEIGHT / 2.8;
+        GLOBE_CENTER = [GLOBE_WIDTH / 2, GLOBE_HEIGHT / 2];
+        
+        // Stop rotation if active
+        if (rotationTimer) {
+            rotationTimer.stop();
+        }
+        
+        // Clear and redraw
+        d3.select("#globe-container").selectAll("*").remove();
+        drawGlobe(currentViewMode);
+    }, 250);
+});
